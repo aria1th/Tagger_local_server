@@ -3,3 +3,9 @@
 *.pb
 *.pid
 models/
+.idea/
+groundingDINO/
+text_mask/test.png
+deprecated/
+example_command.txt
+outputs/
