@@ -1,11 +1,33 @@
 from grounded_sam_demo import load_model, get_grounding_output
 from segment_anything import SamPredictor, build_sam, build_sam_hq
+# fastAPI
+from fastapi import FastAPI
+
+# pydantic
+from pydantic import BaseModel
+
+# uvicorn
+import uvicorn
+
+class Item(BaseModel):
+    # image from numpy array of shape (H, W, 3)
+    image: list[list[list[float]]]
+    text_prompt: str
+    box_threshold: float
+    text_threshold: float
+
+class ItemResponse(BaseModel):
+    # returns mask as numpy array of shape (H, W)
+    mask: list[list[int]]
+    # optional json data
+    json_data: list[dict] = []
 
 model = None
 predictor = None # SamPredictor
 device = "cuda:0"
 use_sam_hq = False
 
+app = FastAPI()
 
 def load_predictor(use_sam_hq, sam_checkpoint, sam_hq_checkpoint, device="cuda:0"):
     global predictor
@@ -207,7 +229,16 @@ def save_mask_data(output_dir, mask_list, box_list, label_list):
         })
     with open(os.path.join(output_dir, 'mask.json'), 'w') as f:
         json.dump(json_data, f)
-    
+    return None
+
+
+# root
+@app.get("/")
+def read_root():
+    return {"Hello": "World"}
+
+# fastAPI
+@app.get("/predict/")
 def process(image_arr, text_prompt, box_threshold, text_threshold, get_json=False):
     global model, predictor
     assert model is not None and predictor is not None, "model and predictor must be loaded first"
@@ -238,22 +269,8 @@ def process(image_arr, text_prompt, box_threshold, text_threshold, get_json=Fals
         boxes = transformed_boxes.to(device),
         multimask_output = False,
     )
-    
-    # draw output image
-    plt.figure(figsize=(10, 10))
-    plt.imshow(image)
-    for mask in masks:
-        show_mask(mask.cpu().numpy(), plt.gca(), random_color=True)
-    for box, label in zip(boxes_filt, pred_phrases):
-        show_box(box.numpy(), plt.gca(), label)
 
-    plt.axis('off')
-    plt.savefig(
-        os.path.join(output_dir, "grounded_sam_output.jpg"), 
-        bbox_inches="tight", dpi=300, pad_inches=0.0
-    )
-
-    mask = extract_mask(masks, boxes_filt, pred_phrases)
+    mask = extract_mask(masks, boxes_filt, pred_phrases, return_json=get_json)
     return mask
 
 
@@ -278,3 +295,13 @@ if __name__ == "__main__":
     # ip
     parser.add_argument("--host", type=str, default="127.0.0.1", help="host ip, default=localhost")
     args = parser.parse_args()
+
+    # load model
+    reload_model(args.config, args.grounded_checkpoint, device=args.device)
+    # load sam
+    load_predictor(args.use_sam_hq, args.sam_checkpoint, args.sam_hq_checkpoint, device=args.device)
+    # check model
+    assert check_model(), "model must be loaded first"
+    # run server
+    uvicorn.run(app, host=args.host, port=args.port)
+
