@@ -15,6 +15,7 @@ class Item(BaseModel):
     text_prompt: str
     box_threshold: float
     text_threshold: float
+    return_json: bool = False
 
 class ItemResponse(BaseModel):
     # returns mask as numpy array of shape (H, W)
@@ -176,12 +177,13 @@ def extract_mask(mask_list, box_list, label_list, return_json=False):
     mask_list: list of torch.Tensor
     box_list: list of torch.Tensor
     label_list: list of str
-    returns: numpy array of shape (H, W) 
+    returns: {'mask': numpy array of shape (H, W) , 'json_data': list of dict}
     """
     value = 0  # 0 for background
-    mask_img = torch.zeros(mask_list.shape[-2:])
+    trues = 255 # 255 for foreground
+    mask_img = torch.zeros(mask_list.shape[-2:], dtype=torch.uint8)
     for idx, mask in enumerate(mask_list):
-        mask_img[mask.cpu().numpy()[0] == True] = value + idx + 1
+        mask_img[mask.cpu().numpy()[0] == True] = (trues if not return_json else value + idx + 1)
     if return_json:
         json_data = [{
             'value': value,
@@ -197,9 +199,9 @@ def extract_mask(mask_list, box_list, label_list, return_json=False):
                 'logit': float(logit),
                 'box': box.numpy().tolist(),
             })
-        return mask_img.numpy(), json_data
+        return {'mask': mask_img.numpy().tolist(), 'json_data': json_data}
     else:
-        return mask_img.numpy()
+        return {'mask': mask_img.numpy().tolist()}
             
 
 def save_mask_data(output_dir, mask_list, box_list, label_list):
@@ -238,8 +240,9 @@ def read_root():
     return {"Hello": "World"}
 
 # fastAPI
-@app.get("/predict/")
-def process(image_arr, text_prompt, box_threshold, text_threshold, get_json=False):
+@app.post("/predict/", response_model=ItemResponse)
+def process(item: Item):
+    image_arr, text_prompt, box_threshold, text_threshold, get_json = item.image, item.text_prompt, item.box_threshold, item.text_threshold, item.return_json
     global model, predictor
     assert model is not None and predictor is not None, "model and predictor must be loaded first"
     # load image
@@ -291,7 +294,7 @@ if __name__ == "__main__":
         "--use_sam_hq", action="store_true", help="using sam-hq for prediction"
     )
     parser.add_argument("--device", type=str, default="cpu", help="running on cpu only!, default=False")
-    parser.add_argument("--port", type=int, default=5000, help="port number, default=5000")
+    parser.add_argument("--port", type=int, default=10808, help="port number, default=10808")
     # ip
     parser.add_argument("--host", type=str, default="127.0.0.1", help="host ip, default=localhost")
     args = parser.parse_args()
